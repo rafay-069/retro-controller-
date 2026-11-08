@@ -1,0 +1,305 @@
+# sdkconfig for the rafay-console target (ESP32-S3-WROOM-1-N16R8).
+#
+# HOW TO USE (per retro-go PORTING.md): build the launcher once
+#   ./rg_tool.py clean
+#   ./rg_tool.py --target=rafay-console build launcher
+# then in launcher/ run `idf.py menuconfig`, confirm the settings below,
+# save, and copy launcher/sdkconfig over this file. rg_tool.py applies
+# this file to every app build for the target. The lines below are the
+# settings that MATTER for this hardware; the generated file will contain
+# many more lines - that is expected.
+#
+# Chip / flash / PSRAM (N16R8 = 16MB flash, 8MB octal PSRAM)
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+#
+# Performance (PORTING.md checklist)
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+CONFIG_PM_ENABLE=n
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+#
+# Filesystem (PORTING.md checklist)
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+#
+# USB: the console flashes and logs over the S3 native USB (GPIO19/20).
+# Keep the USB Serial/JTAG console so `rg_tool.py monitor` works.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+#
+# Partition table (added 2026-11-08 during the first compile test — without
+# these lines ESP-IDF falls back to its default single-app table with a 1MB
+# factory partition and the 1.26MB launcher overflows it; every upstream
+# target carries these. Points at retro-go's root partitions.csv, whose 3MB
+# dummy app slot is only a build-time placeholder — rg_tool.py generates
+# the real table when building the flashable .img.)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="../partitions.csv"
+
+// Retro-Go target: rafay-console (custom ESP32-S3 handheld, Rev 1 PCB)
+// Copy this folder to components/retro-go/targets/rafay-console in the
+// retro-go source tree, then build with:  ./rg_tool.py --target=rafay-console
+// Every GPIO below matches pcb/PINOUT.md exactly. Do not edit one without
+// the other.
+
+// Target definition
+#define RG_TARGET_NAME              "RAFAY CONSOLE"
+
+// Storage (microSD slot on the screen module, shares the LCD SPI bus)
+#define RG_STORAGE_ROOT             "/sd"
+#define RG_STORAGE_SDSPI_HOST       SPI2_HOST
+#define RG_STORAGE_SDSPI_SPEED      SDMMC_FREQ_DEFAULT
+
+// Audio (external I2S DAC/amp = MAX98357A; ESP32-S3 has no internal DAC)
+#define RG_AUDIO_USE_INT_DAC        0   // 0 = Disable
+#define RG_AUDIO_USE_EXT_DAC        1   // 0 = Disable, 1 = Enable
+
+// Video (2.8" ILI9341 module, native portrait glass mounted rotated = 320x240)
+#define RG_SCREEN_DRIVER            0   // 0 = ILI9341/ST7789
+#define RG_SCREEN_HOST              SPI2_HOST
+#define RG_SCREEN_SPEED             SPI_MASTER_FREQ_40M
+#define RG_SCREEN_BACKLIGHT         1
+#define RG_SCREEN_WIDTH             320
+#define RG_SCREEN_HEIGHT            240
+#define RG_SCREEN_ROTATE            0
+#define RG_SCREEN_VISIBLE_AREA      {0, 0, 0, 0}
+#define RG_SCREEN_SAFE_AREA         {0, 0, 0, 0}
+// Init sequence: the ODROID-GO ILI9341 reference sequence (same driver and
+// controller). BRING-UP NOTE: MADCTL is command 0x36 below (0xA8). If the
+// picture comes up rotated or mirrored on the real module, change ONLY that
+// byte: try 0xE8, 0x28, or 0x68 (the four rotations, BGR kept) until the
+// launcher reads correctly. This is a one-line, expected bring-up tweak.
+#define RG_SCREEN_INIT()                                                                                         \
+    ILI9341_CMD(0xCF, 0x00, 0xc3, 0x30);                                                                         \
+    ILI9341_CMD(0xED, 0x64, 0x03, 0x12, 0x81);                                                                   \
+    ILI9341_CMD(0xE8, 0x85, 0x00, 0x78);                                                                         \
+    ILI9341_CMD(0xCB, 0x39, 0x2c, 0x00, 0x34, 0x02);                                                             \
+    ILI9341_CMD(0xF7, 0x20);                                                                                     \
+    ILI9341_CMD(0xEA, 0x00, 0x00);                                                                               \
+    ILI9341_CMD(0xC0, 0x1B);                 /* Power control   //VRH[5:0] */                                    \
+    ILI9341_CMD(0xC1, 0x12);                 /* Power control   //SAP[2:0];BT[3:0] */                            \
+    ILI9341_CMD(0xC5, 0x32, 0x3C);           /* VCM control */                                                   \
+    ILI9341_CMD(0xC7, 0x91);                 /* VCM control2 */                                                  \
+    ILI9341_CMD(0x36, 0xA8);                 /* Memory Access Control (MY|MV|BGR) */                             \
+    ILI9341_CMD(0xB1, 0x00, 0x10);           /* Frame Rate Control (1B=70, 1F=61, 10=119) */                     \
+    ILI9341_CMD(0xB6, 0x0A, 0xA2);           /* Display Function Control */                                      \
+    ILI9341_CMD(0xF6, 0x01, 0x30);                                                                               \
+    ILI9341_CMD(0xF2, 0x00);                 /* 3Gamma Function Disable */                                       \
+    ILI9341_CMD(0x26, 0x01);                 /* Gamma curve selected */                                          \
+    ILI9341_CMD(0xE0, 0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1, 0x37, 0x07, 0x10, 0x03, 0x0E, 0x09, 0x00); \
+    ILI9341_CMD(0xE1, 0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F);
+
+// Input (all buttons: GPIO to GND, active-low; see PINOUT.md)
+#define RG_GAMEPAD_GPIO_MAP {\
+    {RG_KEY_UP,     .num = GPIO_NUM_38, .pullup = 1, .level = 0},\
+    {RG_KEY_DOWN,   .num = GPIO_NUM_39, .pullup = 1, .level = 0},\
+    {RG_KEY_LEFT,   .num = GPIO_NUM_40, .pullup = 1, .level = 0},\
+    {RG_KEY_RIGHT,  .num = GPIO_NUM_41, .pullup = 1, .level = 0},\
+    {RG_KEY_A,      .num = GPIO_NUM_47, .pullup = 1, .level = 0},\
+    {RG_KEY_B,      .num = GPIO_NUM_48, .pullup = 1, .level = 0},\
+    {RG_KEY_START,  .num = GPIO_NUM_13, .pullup = 1, .level = 0},\
+    {RG_KEY_SELECT, .num = GPIO_NUM_14, .pullup = 1, .level = 0},\
+    {RG_KEY_MENU,   .num = GPIO_NUM_12, .pullup = 1, .level = 0},\
+    {RG_KEY_OPTION, .num = GPIO_NUM_0,  .pullup = 0, .level = 0},\
+}
+// OPTION is the BOOT button on the back of the console (external 10k pull-up
+// fitted, hence .pullup = 0) - same arrangement as the ODROID-GO.
+
+// Battery (ADC1 channel 0 = GPIO1, 100k/100k divider = x2, same maths as
+// the ODROID-GO target)
+#define RG_BATTERY_DRIVER           1
+#define RG_BATTERY_ADC_UNIT         ADC_UNIT_1
+#define RG_BATTERY_ADC_CHANNEL      ADC_CHANNEL_0
+#define RG_BATTERY_CALC_PERCENT(raw) (((raw) * 2.f - 3500.f) / (4200.f - 3500.f) * 100.f)
+#define RG_BATTERY_CALC_VOLTAGE(raw) ((raw) * 2.f * 0.001f)
+
+// Status LED (red, front edge)
+#define RG_GPIO_LED                 GPIO_NUM_2
+
+// SPI Display
+#define RG_GPIO_LCD_MISO            GPIO_NUM_17
+#define RG_GPIO_LCD_MOSI            GPIO_NUM_8
+#define RG_GPIO_LCD_CLK             GPIO_NUM_18
+#define RG_GPIO_LCD_CS              GPIO_NUM_16
+#define RG_GPIO_LCD_DC              GPIO_NUM_15
+#define RG_GPIO_LCD_BCKL            GPIO_NUM_6
+#define RG_GPIO_LCD_RST             GPIO_NUM_7
+
+// SPI SD Card (same bus as the LCD; CS is pin 14 of the screen module)
+#define RG_GPIO_SDSPI_MISO          GPIO_NUM_17
+#define RG_GPIO_SDSPI_MOSI          GPIO_NUM_8
+#define RG_GPIO_SDSPI_CLK           GPIO_NUM_18
+#define RG_GPIO_SDSPI_CS            GPIO_NUM_5
+
+// External I2S DAC (MAX98357A; its SD_MODE pin is resistor-set to (L+R)/2
+// mono mix and the amp is always on with VSYS, so no amp-enable GPIO)
+#define RG_GPIO_SND_I2S_BCK         GPIO_NUM_4
+// 2026-11-08: WS/DATA swapped vs the original freeze (PCB routing fix —
+// the swap removes a forced track crossing at the module; see PINOUT.md).
+#define RG_GPIO_SND_I2S_WS          GPIO_NUM_10
+#define RG_GPIO_SND_I2S_DATA        GPIO_NUM_9
+// #define RG_GPIO_SND_AMP_ENABLE      GPIO_NUM_NC
+
+// Updater
+#define RG_UPDATER_ENABLE               1
+#define RG_UPDATER_APPLICATION          RG_APP_FACTORY
+#define RG_UPDATER_DOWNLOAD_LOCATION    RG_STORAGE_ROOT "/rafay-console/firmware"
+
+# This file is injected late into rg_tool.py (see retro-go PORTING.md)
+
+# Espressif chip in the device
+IDF_TARGET = "esp32s3"
+
+# No FW_FORMAT: this device is flashed with the .img image over USB
+# (see ../FLASHING.md), not with an ODROID-style .fw file.
+
+# Default apps to build when none is specified (comment to build all)
+# DEFAULT_APPS = "launcher retro-core gb-go nes-go"
+
+# FLASHING.md — Retro-Go on the Rafay Console (Rev 1)
+
+**Build status: COMPILE-VERIFIED 2026-11-08.** Built end-to-end with
+ESP-IDF **v5.2.2** and Retro-Go master (1.46-8-g4ced1): the launcher and
+all apps (launcher, retro-core, prboom-go, gwenesis, fmsx) compile and
+link, and `build-img` packed the flashable image
+`retro-go_1.46-8-g4ced1-dirty_rafay-console.img` (**5,374,208 bytes** —
+the `-dirty` suffix just marks the step-2 edit below; harmless). Two
+first-build fixes were needed and are now documented in this file: the
+target registration in step 2 (without it the build silently falls back
+to the ODROID-GO config and fails on ESP32-S3), and the partition-table
+lines that are now included in the target's `sdkconfig`. NOT yet run on
+real hardware — the screen-rotation byte (step 6) remains the expected
+one-line bring-up tweak. Full build log: `../work/FW_BUILD_STATUS.md`.
+
+## 1. Toolchain
+
+- Install **ESP-IDF v5.2.2** (the version this target was verified with;
+  Retro-Go supports ESP-IDF 4.4–5.3, and the ESP32-S3 + octal-PSRAM
+  configuration is smoothest on 5.x).
+  Follow Espressif's official get-started for your OS, choose target
+  `esp32s3` during install.
+- Optional but recommended (Retro-Go BUILDING.md): apply the patches in
+  retro-go's `tools/patches` to the ESP-IDF install (`panic-hook` is
+  optional; `sdcard-fix` was written for the ODROID-GO — harmless to
+  apply, skip it if it does not apply cleanly on 5.x).
+
+## 2. Get Retro-Go and add this target
+
+```
+git clone -b master https://github.com/ducalex/retro-go
+cp -r <this package>/firmware/rafay-console  retro-go/components/retro-go/targets/
+```
+
+The folder must end up at `components/retro-go/targets/rafay-console`
+containing `config.h`, `env.py`, `sdkconfig`.
+
+**Then register the target** (Retro-Go PORTING.md requires this for every
+new target; without it the build silently defaults to ODROID-GO and fails).
+In `components/retro-go/config.h`, add this branch anywhere in the
+`#elif` chain before the final `#else`:
+
+```c
+#elif defined(RG_TARGET_RAFAY_CONSOLE)
+#include "targets/rafay-console/config.h"
+```
+
+## 3. First build (generates the full sdkconfig)
+
+```
+cd retro-go
+./rg_tool.py clean
+./rg_tool.py --target=rafay-console build launcher
+```
+
+The shipped `sdkconfig` is a minimal fragment and is sufficient as-is —
+it already includes the partition-table lines
+(`CONFIG_PARTITION_TABLE_CUSTOM=y`, filename `../partitions.csv`) that
+the first compile test found necessary; without them ESP-IDF uses a 1MB
+default factory partition and the 1.26MB launcher overflows it. If you
+still need to adjust a setting: `cd launcher && idf.py menuconfig`, save,
+then copy `launcher/sdkconfig` back over the target's `sdkconfig` (this
+is Retro-Go's documented flow).
+
+## 4. Build the full image and flash it
+
+```
+./rg_tool.py --target=rafay-console build-img
+```
+
+Verified 2026-11-08: this produced
+`retro-go_1.46-8-g4ced1-dirty_rafay-console.img` (5,374,208 bytes) in the
+retro-go root, from launcher.bin 1,260,752 B, retro-core.bin 1,098,256 B,
+prboom-go.bin 952,992 B, gwenesis.bin 1,098,320 B, fmsx.bin 767,312 B.
+(Your version string will differ with the Retro-Go commit you clone.)
+
+Connect the console by USB-C, power switch ON, then:
+
+```
+./rg_tool.py --target=rafay-console --port=<PORT> install
+```
+
+or with esptool directly:
+
+```
+esptool.py --chip esp32s3 --port <PORT> write_flash --flash_size detect 0x0 retro-go_*.img
+```
+
+`<PORT>` is the S3's native-USB serial port (COMx on Windows, /dev/ttyACMx
+on Linux). No USB-UART chip is fitted — the port appears only when the S3
+is running or in download mode.
+
+**Entering download mode on this console:** BOOT and RESET are the two
+tact buttons on the BACK of the PCB (labelled on the silkscreen). Hold
+BOOT, tap RESET, release BOOT. Do this with the bottom shell off, or hold
+BOOT while plugging in the USB cable with the shell open. After the first
+successful flash, later updates can also be installed from the SD card
+via the launcher's updater (`/rafay-console/firmware` on the card).
+
+## 5. microSD card layout
+
+Format the card **FAT32**. Create:
+
+```
+/roms/nes/     <- .nes files   (Mario 1/2/3, ...)
+/roms/gb/      <- .gb files    (Mario Land 1/2, Pokemon Red/Blue/Yellow)
+/roms/gbc/     <- .gbc files   (Pokemon Gold/Silver/Crystal)
+/roms/sms/  /roms/gg/  /roms/col/  /roms/pce/  /roms/lynx/  /roms/gw/
+```
+
+Retro-Go creates its own system/save folders on first boot. Use ROM files
+you own. Insert the card through the slot in the console's right side —
+it slides into the screen module's back-side slot (see the shell notes in
+the package README). **Before first power-up, re-read verify-before-fab
+item #1 in the README** (the module's pin 14 must be the SD_CS variant).
+
+## 6. First-boot bring-up checklist
+
+1. Screen lights, launcher readable. If rotated/mirrored: change the
+   MADCTL byte (0x36) in `config.h` — try 0xE8 / 0x28 / 0x68 — rebuild,
+   reflash. (Expected one-time tweak; the shipped value 0xA8 is the
+   ODROID-GO reference.)
+2. All 10 front buttons respond in a game (D-pad, A, B, START, SELECT,
+   MENU opens the Retro-Go menu). BOOT button acts as OPTION.
+3. Sound from the speaker, volume keys work in the menu. If far too loud
+   or quiet, the amp gain is set by one resistor on the PCB (R_GAIN is a
+   hard tie to GND = 12 dB; see PINOUT.md §6 for the gain table).
+4. Battery icon moves between full and empty across a charge cycle;
+   red CHG LED on while charging, green FULL LED when done.
+5. SD card shows the ROM list. If the card is never detected but the
+   screen works, suspect verify item #1 (module variant) first.
+
+## 7. Day-to-day development
+
+```
+./rg_tool.py --target=rafay-console --port=<PORT> run launcher   # build+flash+monitor one app
+./rg_tool.py --target=rafay-console --port=<PORT> monitor retro-core
+```
+
+Crash logs land in `/sd/crash.log` when the panic-hook patch is applied.
